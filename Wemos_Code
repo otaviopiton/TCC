@@ -1,0 +1,319 @@
+// BIBLIOTECAS ---------------------------------------------------------------------
+#include <ESP8266WiFi.h>
+#include<PubSubClient.h>
+#include<Servo.h>
+
+// VARIÁVEIS --------------------------------------------------------------------------
+
+char receivedChar;
+char msg[5];
+
+// Temperature
+byte NTCPin = A0;
+int i, n=0;
+char temp;
+float steinhart;
+
+// Led
+int dining_light = D7;
+char dining_status = 'h';
+int living_light = D6;
+char living_status = 'g';
+int kitchen_light = D3;
+char kitchen_status = 'f';
+char all_status = 'z';
+
+// Servo
+int pinservo = D2;
+Servo s;
+int pos;
+char lock_status = 'o';
+
+// Alarme
+int buzzer = D1;
+int pinopir = D0;
+char alarm_status = 'r';
+int valorpir = 0;
+
+
+const char* mqtt_server = "iot.eclipse.org";
+const char* ssid = "TP-LINK_C274";
+const char* password = "12111994";
+WiFiClient espclient;
+
+// SETUP GERAL -------------------------------------------------------------------------
+
+void setup() {
+
+  digitalWrite(kitchen_light, HIGH);
+  digitalWrite(living_light, HIGH);
+  digitalWrite(dining_light, HIGH);
+
+  pinMode(dining_light, OUTPUT);
+  pinMode(living_light, OUTPUT);
+  pinMode(kitchen_light, OUTPUT);
+  pinMode(BUILTIN_LED, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+
+  pinMode(pinopir, INPUT);
+
+  Serial.begin(115200);
+  Serial.print("WiFi connecting.");
+  WiFi.begin(ssid, password);        //SSID,PASSWORD
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.print("Connected");
+  Serial.println();
+
+  reconnect();
+
+  s.attach(pinservo);
+  s.write(0);
+
+}
+
+PubSubClient client(mqtt_server, 1883, callback, espclient);
+
+// Temperature sensor NTC -------------------------------------------------------
+
+void ntc() {
+
+  float A0value;
+  float Resistance;
+
+  for (i = 0; i < 5; i++) {
+    A0value = A0value + analogRead(NTCPin);
+  }
+  A0value = A0value / 5;
+
+  Resistance = (1023 / A0value) - 1;
+  Resistance = 10000 / Resistance;
+
+  float steinhart;
+
+  steinhart = Resistance / 10000; // (R/Ro)
+  steinhart = log(steinhart); // ln(R/Ro)
+  steinhart = steinhart / 3950; // 1/B * ln(R/Ro)
+  steinhart = steinhart + (1.0 / (25 + 273.15)); // + (1/To)
+  steinhart = 1.0 / steinhart; // Invert
+  steinhart = steinhart - 273.15; // convert to C
+  steinhart = round(steinhart);
+
+  int temp = (int) steinhart;
+
+  Serial.print("Temperature:");
+  Serial.print(steinhart);
+  Serial.println("ºC");
+
+  snprintf (msg, 5, " %d ", temp);
+
+  client.publish("tempotavio_in", msg);
+}
+
+// FUNÇÃO CALLBACK ----------------------------------------------------------------
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+
+
+  if (strcmp(topic, "testlight_otavio") == 0) {
+    for (int i = 0; i < length; i++) {
+      char receivedChar = (char)payload[i];
+      Serial.print(receivedChar);
+      if (receivedChar == '1')
+        digitalWrite(BUILTIN_LED, HIGH);
+      if (receivedChar == '0')
+        digitalWrite(BUILTIN_LED, LOW);
+    }
+  }
+
+  if (strcmp(topic, "otavio_alarm") == 0) {
+    n = 0;
+    for (int i = 0; i < length; i++) {
+      char receivedChar = (char)payload[i];
+      Serial.print(receivedChar);
+      if (receivedChar == '1'){
+        alarm_status = 'm';
+        snprintf (msg, 3, "%c", alarm_status);
+        client.publish("otavio_allstatus", msg);}
+      if (receivedChar == '0'){
+        alarm_status = 'r';
+        snprintf (msg, 3, "%c", alarm_status);
+        client.publish("otavio_allstatus", msg);}
+    }
+  }
+
+  if (strcmp(topic, "otavio_lock") == 0) {
+    for (int i = 0; i < length; i++) {
+      char receivedChar = (char)payload[i];
+      Serial.print(receivedChar);
+      if (receivedChar == '0'){
+        lock_status = 'o';
+        snprintf (msg, 3, "%c", lock_status);
+        client.publish("otavio_allstatus", msg);
+        s.write(90);}
+      if (receivedChar == '1'){
+        lock_status = 'c';
+        snprintf (msg, 3, "%c", lock_status);
+        client.publish("otavio_allstatus", msg);
+        s.write(0);}
+    }
+  }
+
+  if (strcmp(topic, "otavio_light") == 0) {
+    for (int i = 0; i < length; i++) {
+      char receivedChar = (char)payload[i];
+      Serial.print(receivedChar);
+      if (receivedChar == 'k'){
+        digitalWrite(kitchen_light, LOW);
+        kitchen_status = 'k';
+        snprintf (msg, 3, "%c", kitchen_status);
+        client.publish("otavio_allstatus", msg);}
+      if (receivedChar == 'f'){
+        digitalWrite(kitchen_light, HIGH);
+        kitchen_status = 'f';
+         snprintf (msg, 3, "%c", kitchen_status);
+        client.publish("otavio_allstatus", msg);}
+        
+      if (receivedChar == 'd'){
+        digitalWrite(dining_light, LOW);
+        dining_status = 'd';
+         snprintf (msg, 3, "%c", dining_status);
+        client.publish("otavio_allstatus", msg);}
+      if (receivedChar == 'h'){
+        digitalWrite(dining_light, HIGH);
+        dining_status = 'h';
+        snprintf (msg, 3, "%c", dining_status);
+        client.publish("otavio_allstatus", msg);}
+        
+      if (receivedChar == 'l'){
+        digitalWrite(living_light, LOW);
+        living_status = 'l';
+        snprintf (msg, 3, "%c", living_status);
+        client.publish("otavio_allstatus", msg);}
+      if (receivedChar == 'g'){
+        digitalWrite(living_light, HIGH);
+        living_status = 'g';
+        snprintf (msg, 3, "%c", living_status);
+        client.publish("otavio_allstatus", msg);}
+        
+      if (receivedChar == 'a'){
+        digitalWrite(kitchen_light, LOW);
+        kitchen_status = 'k';
+        digitalWrite(dining_light, LOW);
+        dining_status = 'd';
+        digitalWrite(living_light, LOW);
+        living_status = 'l';
+        all_status = 'a';
+        snprintf (msg, 3, "%c", all_status);
+        client.publish("otavio_allstatus", msg);}
+        
+      if (receivedChar == 'z'){
+        digitalWrite(kitchen_light, HIGH);
+        kitchen_status = 'f';
+        digitalWrite(dining_light, HIGH);
+        dining_status = 'h';
+        digitalWrite(living_light, HIGH);
+        living_status = 'g';
+        all_status = 'z';
+        snprintf (msg, 3, "%c", all_status);
+        client.publish("otavio_allstatus", msg);}
+    }
+  }
+
+  if (strcmp(topic, "otavio_outstatus") == 0) {
+    for (int i = 0; i < length; i++) {
+      char receivedChar = (char)payload[i];
+      Serial.print(receivedChar);
+    if (receivedChar == 'k'){
+    snprintf (msg, 3, "%c", kitchen_status);
+    client.publish("otavio_instatus", msg);}
+
+    if (receivedChar == 'd'){
+    snprintf (msg, 3, "%c", dining_status);
+    client.publish("otavio_instatus", msg);}
+
+    if (receivedChar == 'l'){
+    snprintf (msg, 3, "%c", living_status);
+    client.publish("otavio_instatus", msg);}
+
+    if (receivedChar == 'c'){
+    snprintf (msg, 3, "%c", lock_status);
+    client.publish("otavio_instatus", msg);}
+
+    if (receivedChar == 'm'){
+    snprintf (msg, 3, "%c", alarm_status);
+    client.publish("otavio_instatus", msg);}
+    }
+  }
+
+  
+  if (strcmp(topic, "tempotavio_out") == 0) {
+    ntc();
+  }
+
+  Serial.println();
+}
+
+// FUNÇÃO RECONNECT --------------------------------------------------------------
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("espclient")) {
+      Serial.println("Connected");
+      // ... and subscribe to topic
+      
+      client.subscribe("otavio_light");
+      client.subscribe("otavio_lock");
+      client.subscribe("otavio_alarm");
+      client.subscribe("testlight_otavio");
+      client.subscribe("tempotavio_out");
+      client.subscribe("otavio_outstatus");
+
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+// MAIN LOOP ----------------------------------------------------------------------
+void loop()
+{
+  if (!client.connected()) {
+    reconnect();
+  }
+
+  client.loop();
+
+  
+  // Alarm function
+  if (alarm_status == 'm'){
+
+    valorpir = digitalRead(pinopir);
+
+     if (valorpir == 1) {
+      Serial.print("Alarm");
+      Serial.println();
+      if(n<1){
+      client.publish("otavio_alarmin", "1");
+      n++;
+      }
+      tone(buzzer, 3000);
+      delay(2000);
+      noTone(buzzer);
+    } else {
+      noTone(buzzer);
+    }
+  }
+
+}
