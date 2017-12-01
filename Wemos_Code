@@ -304,10 +304,6 @@ void loop()
      if (valorpir == 1) {
       Serial.print("Alarm");
       Serial.println();
-      if(n<1){
-      client.publish("otavio_alarmin", "1");
-      n++;
-      }
       tone(buzzer, 3000);
       delay(2000);
       noTone(buzzer);
