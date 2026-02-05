@@ -1,3 +1,3 @@
 # TCC
 
-Repository with the full programation of the work.
+A repository containing the full codes of work.
